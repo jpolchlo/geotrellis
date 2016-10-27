@@ -160,12 +160,11 @@ case class Delaunay(verts: Array[Point]) {
   }
 
   private def distinctBy[T](eq: (T,T) => Boolean)(l: List[T]): List[T] = {
-    l match {
-      case Nil => Nil
-      case x::Nil => x::Nil
-      case x::y::xs if eq(x,y) => distinctBy(eq)(x::xs)
-      case x::y::xs => x :: distinctBy(eq)(y::xs)
-    }
+    l.foldLeft(Nil: List[T]){ case (acc, elem) => acc match {
+      case Nil => List(elem)
+      case x :: xs if eq(x, elem) => acc
+      case x :: xs => x :: acc
+    }}.reverse
   }
 
   private val vIx = distinctBy{ (i: Int, j: Int) => verts(i).distance(verts(j)) < 1e-10 }(
