@@ -17,21 +17,19 @@ object SingleStagePyramid {
 
   //import geotrellis.spark.pyramid.Options
 
-  def apply[
-    K: SpatialComponent: ClassTag
-  ](source: RDD[(K, Raster[Tile])],  
+  def apply(
+    source: RDD[(SpatialKey, Raster[Tile])],  
     sourceZoom: Int,
-    layoutScheme: ZoomedLayoutScheme,
+    //layoutScheme: ZoomedLayoutScheme,
     resampleMethod: ResampleMethod = NearestNeighbor
-  ): RDD[((Int, K), Raster[Tile])] = {
+  ): RDD[((Int, SpatialKey), Raster[Tile])] = {
     val exemplar = source.first._2
     val (w, h) = exemplar.dimensions
 
     //val sourceLayout = source.metadata.getComponent[LayoutDefinition]
     //val LayoutLevel(nextZoom, nextLayout) = layoutScheme.zoomOut(LayoutLevel(zoom, sourceLayout))
 
-    val subpyramidHeight = (math.log(math.min(w, h)) / math.log(2)).toInt
-    val pyramidBase = source.map{ case (key, raster) => ((sourceZoom, key), raster) }
+    val pyramidBase: RDD[((Int, SpatialKey), Raster[Tile])] = source.map{ case (key, raster) => ((sourceZoom, key), raster) }
 
     // Start from RDD[(SpatialKey, Tile)]
     // Reduce each tile into a sub-pyramid
@@ -65,12 +63,17 @@ object SingleStagePyramid {
       (res, seq1.reverse)
     }
 
-    fuseTiles(mapAccumL(source, 1 to phases){ (base, _) => {
-      val subpyramids = base.map(pyramid(_))
-      val tops = subpyramids.map(_.head)
-      val newbase = fuseTiles(tops)
-                             (newbase, subpyramids.flatMap{x => x})
-    }}.snd.reduce(_.union(_))).union(pyramidBase)
+    val subpyramidHeight = (math.log(math.min(w, h)) / math.log(2)).toInt + 1
+    val phases = math.ceil(sourceZoom.toDouble / subpyramidHeight.toDouble).toInt
+
+    fuseTiles(
+      mapAccumL(pyramidBase, 1 to phases){ (base, i) => {
+        val subpyramids: RDD[Seq[((Int, SpatialKey), Raster[Tile])]] = base.map(pyramid(_))
+        val tops: RDD[((Int, SpatialKey), Raster[Tile])] = subpyramids.map(_.head)
+        val newbase: RDD[((Int, SpatialKey), Raster[Tile])] = fuseTiles(tops)
+        (newbase, (if (i==phases) subpyramids.flatMap{x => x} else subpyramids.flatMap(_.tail)).union(base))
+      }}._2.reduce(_.union(_))
+    ).union(pyramidBase)
   }
 
 }
